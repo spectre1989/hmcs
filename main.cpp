@@ -1,9 +1,30 @@
 #include <windows.h>
+#include <stdio.h>
 
-int WinMain(HINSTANCE instance, HINSTANCE prev_instance, LPSTR cmd_line, int show_cmd)
+LRESULT window_proc(HWND window, UINT msg, WPARAM w_param, LPARAM l_param)
 {
+	return DefWindowProcA(window, msg, w_param, l_param);
+}
+
+int WinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev_instance, _In_ LPSTR cmd_line, _In_ int show_cmd)
+{
+	WNDCLASSA window_class;
+	window_class.style = 0;
+	window_class.lpfnWndProc = window_proc;
+	window_class.cbClsExtra = 0;
+	window_class.cbWndExtra = 0;
+	window_class.hInstance = instance;
+	window_class.hIcon = nullptr;
+	window_class.hCursor = nullptr;
+	window_class.hbrBackground = nullptr;
+	window_class.lpszMenuName = nullptr;
+	window_class.lpszClassName = "HMCSClass";
+
+	ATOM window_class_atom = RegisterClassA(&window_class);
+	// TODO check errors
+
 	HWND window = CreateWindowA(
-		nullptr, //lpClassName
+		(LPCSTR)window_class_atom, //lpClassName
 		"HMCS", //lpWindowName
 		WS_OVERLAPPEDWINDOW, //dwStyle
 		100, //x
@@ -15,7 +36,17 @@ int WinMain(HINSTANCE instance, HINSTANCE prev_instance, LPSTR cmd_line, int sho
 		instance, //hInstance
 		nullptr //lpParam
 	);
+	// TODO check errors
+
+	ShowWindow(window, SW_SHOW);
+	// TODO check errors
 
 	while (true)
-	{}
+	{
+		MSG msg;
+		while (PeekMessageA(&msg, window, 0, 0, PM_REMOVE))
+		{
+			DispatchMessageA(&msg);
+		}
+	}
 }
