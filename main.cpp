@@ -1,8 +1,7 @@
 #include <windows.h>
 #include <stdio.h>
 
-#include <vulkan/vulkan.h>
-
+#include "graphics.h"
 #include "mdl_file.h"
 #include "types.h"
 
@@ -58,7 +57,7 @@ int WinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev_instance, _In_ LPST
 
 	MDL_Header* header = (MDL_Header*)buffer;
 
-	vkCreateInstance(0, 0, 0);
+	graphics_init(instance, window, 1600, 900);
 
 	while (true)
 	{
