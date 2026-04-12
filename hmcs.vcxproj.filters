@@ -18,10 +18,28 @@
     <ClCompile Include="hmcs.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="graphics.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="volk.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="types.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="graphics.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="volk.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="assert.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="volk.version" />
   </ItemGroup>
 </Project>
