@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="hmcs.vcxproj" Id="f79a90e0-3217-4f37-b393-7ca3707c8921" />
+</Solution>
