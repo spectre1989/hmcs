@@ -9,6 +9,25 @@
 
 
 
+typedef struct vertex_t
+{
+	float32_t position[3];
+	float32_t colour[3];
+} vertex_t;
+
+typedef struct buffer_t
+{
+	VkBuffer buffer;
+	VkDeviceMemory memory;
+} buffer_t;
+
+vertex_t vertices[3] = {
+	{.position = {0.0f, -0.5f, 0.0f}, .colour = {1.0f, 0.0f, 0.0f}},
+	{.position = {-0.5f, 0.5f, 0.0f}, .colour = {0.0f, 1.0f, 0.0f}},
+	{.position = {0.0f, 0.5f, 0.0f}, .colour = {0.0f, 0.0f, 1.0f}}
+};
+uint16_t indices[3] = { 0,1,2 };
+
 #define DEBUG_BUFFER_SIZE 1024
 
 static char* g_debug_buffer = NULL;
@@ -22,6 +41,55 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(
 	snprintf(g_debug_buffer, DEBUG_BUFFER_SIZE, "[Vulkan] %s\n", pCallbackData->pMessage);
 	OutputDebugStringA(g_debug_buffer);
 	return VK_FALSE; // don't abort the call
+}
+
+static uint32_t find_memory_type_index(VkPhysicalDeviceMemoryProperties* memory_properties, VkMemoryPropertyFlags desired_properties, uint32_t memory_type_bits)
+{
+	for (uint32_t i = 0; i < memory_properties->memoryTypeCount; ++i)
+	{
+		if ((memory_properties->memoryTypes[i].propertyFlags & desired_properties) == desired_properties &&
+			memory_type_bits & (1 << i))
+		{
+			return i;
+		}
+	}
+
+	return -1;
+}
+
+static buffer_t create_buffer(graphics_t* graphics, VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags memory_properties)
+{
+	// todo proper allocator
+	VkBufferCreateInfo create_info = {
+		.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+		.size = size,
+		.usage = usage,
+		.sharingMode = VK_SHARING_MODE_EXCLUSIVE
+	};
+	VkBuffer buffer;
+	VkResult result = vkCreateBuffer(graphics->device, &create_info, NULL, &buffer);
+	assert(result == VK_SUCCESS);
+
+	VkMemoryRequirements memory_requirements;
+	vkGetBufferMemoryRequirements(graphics->device, buffer, &memory_requirements);
+
+	VkMemoryAllocateInfo alloc_info = {
+		.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+		.allocationSize = memory_requirements.size,
+		.memoryTypeIndex = find_memory_type(&memory_properties, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, memory_requirements.memoryTypeBits)
+	};
+
+	VkDeviceMemory memory;
+	result = vkAllocateMemory(graphics->device, &alloc_info, NULL, &memory);
+	assert(result == VK_SUCCESS);
+
+	result = vkBindBufferMemory(graphics->device, buffer, memory, 0);
+	assert(result == VK_SUCCESS);
+
+	return (buffer_t) {
+		.buffer = buffer,
+		.memory = memory
+	};
 }
 
 void graphics_init(HINSTANCE instance_handle, HWND window_handle, graphics_t* graphics)
@@ -397,30 +465,45 @@ void graphics_init(HINSTANCE instance_handle, HWND window_handle, graphics_t* gr
 		VkMemoryRequirements memory_requirements = { 0 };
 		vkGetImageMemoryRequirements(graphics->device, depth_buffer, &memory_requirements);
 
-		uint32_t memory_type_index = -1;
-		VkPhysicalDeviceMemoryProperties memory_properties = { 0 };
+		VkPhysicalDeviceMemoryProperties memory_properties;
 		vkGetPhysicalDeviceMemoryProperties(physical_device, &memory_properties);
-		for (uint32_t i = 0; i < memory_properties.memoryTypeCount; ++i)
-		{
-			if (memory_properties.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT &&
-				memory_requirements.memoryTypeBits & (1 << i))
-			{
-				memory_type_index = i;
-				break;
-			}
-		}
-		assert(memory_type_index != -1);
 
 		VkMemoryAllocateInfo alloc_info = {
 			.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
 			.allocationSize = memory_requirements.size,
-			.memoryTypeIndex = memory_type_index
+			.memoryTypeIndex = find_memory_type_index(&memory_properties, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, memory_requirements.memoryTypeBits)
 		};
 		VkDeviceMemory memory;
 		result = vkAllocateMemory(graphics->device, &alloc_info, NULL, &memory);
 		assert(result == VK_SUCCESS);
 
 		result = vkBindImageMemory(graphics->device, depth_buffer, memory, 0);
+		assert(result == VK_SUCCESS);
+
+		VkDeviceSize vertices_size = sizeof(vertices);
+
+		// todo proper allocator
+		VkBufferCreateInfo buffer_create_info = {
+			.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+			.size = vertices_size,
+			.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+			.sharingMode = VK_SHARING_MODE_EXCLUSIVE
+		};
+		VkBuffer staging_buffer;
+		result = vkCreateBuffer(graphics->device, &buffer_create_info, NULL, &staging_buffer);
+		assert(result == VK_SUCCESS);
+
+		vkGetBufferMemoryRequirements(graphics->device, staging_buffer, &memory_requirements);
+
+		alloc_info = (VkMemoryAllocateInfo){
+			.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+			.allocationSize = memory_requirements.size,
+			.memoryTypeIndex = find_memory_type(&memory_properties, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, memory_requirements.memoryTypeBits)
+		};
+		VkDeviceMemory staging_buffer_memory;
+		result = vkAllocateMemory(graphics->device, &alloc_info, NULL, &staging_buffer_memory);
+		assert(result == VK_SUCCESS);
+		result = vkBindBufferMemory(graphics->device, staging_buffer, staging_buffer_memory, 0);
 		assert(result == VK_SUCCESS);
 	}
 
