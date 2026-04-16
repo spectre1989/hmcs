@@ -7,5 +7,5 @@ layout(location = 0) out vec3 out_colour;
 
 void main() {
     gl_Position = vec4(in_position, 1.0);
-    frag_colour = in_colour;
+    out_colour = in_colour;
 }

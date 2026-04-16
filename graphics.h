@@ -4,6 +4,7 @@
 
 
 
+// todo should move graphics_t to graphics.c
 enum { FRAMES_IN_FLIGHT = 2 };
 
 typedef struct graphics_t
@@ -21,6 +22,7 @@ typedef struct graphics_t
 	VkPipeline pipeline;
 	VkCommandBuffer command_buffers[FRAMES_IN_FLIGHT];
 	int32_t current_frame;
+	VkPhysicalDeviceMemoryProperties device_memory_properties;
 } graphics_t;
 
 void graphics_init(HINSTANCE instance_handle, HWND window_handle, graphics_t* graphics);
