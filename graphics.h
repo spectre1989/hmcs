@@ -7,10 +7,17 @@
 // todo should move graphics_t to graphics.c
 enum { FRAMES_IN_FLIGHT = 2 };
 
+typedef struct vk_buffer_t
+{
+	VkBuffer buffer;
+	VkDeviceMemory memory;
+} vk_buffer_t;
+
 typedef struct graphics_t
 {
 	VkDevice device;
 	VkQueue graphics_queue;
+	VkQueue transfer_queue;
 	VkSwapchainKHR swapchain;
 	VkExtent2D swapchain_extent;
 	uint32_t swapchain_image_count;
@@ -23,6 +30,10 @@ typedef struct graphics_t
 	VkCommandBuffer command_buffers[FRAMES_IN_FLIGHT];
 	int32_t current_frame;
 	VkPhysicalDeviceMemoryProperties device_memory_properties;
+	VkCommandPool graphics_command_pool;
+	VkCommandPool transfer_command_pool;
+	vk_buffer_t vertex_buffer;
+	vk_buffer_t index_buffer;
 } graphics_t;
 
 void graphics_init(HINSTANCE instance_handle, HWND window_handle, graphics_t* graphics);

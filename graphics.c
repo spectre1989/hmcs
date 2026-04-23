@@ -15,12 +15,6 @@ typedef struct vertex_t
 	float32_t colour[3];
 } vertex_t;
 
-typedef struct vk_buffer_t
-{
-	VkBuffer buffer;
-	VkDeviceMemory memory;
-} vk_buffer_t;
-
 vertex_t vertices[3] = {
 	{.position = {0.0f, -0.5f, 0.0f}, .colour = {1.0f, 0.0f, 0.0f}},
 	{.position = {-0.5f, 0.5f, 0.0f}, .colour = {0.0f, 1.0f, 0.0f}},
@@ -75,7 +69,6 @@ static VkDeviceMemory alloc_device_memory(graphics_t* graphics, VkDeviceSize siz
 
 static vk_buffer_t create_buffer(graphics_t* graphics, VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags desired_memory_properties)
 {
-	// todo proper allocator
 	VkBufferCreateInfo create_info = {
 		.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
 		.size = size,
@@ -98,6 +91,44 @@ static vk_buffer_t create_buffer(graphics_t* graphics, VkDeviceSize size, VkBuff
 		.buffer = buffer,
 		.memory = memory
 	};
+}
+
+static void copy_buffer(graphics_t* graphics, VkBuffer src, VkBuffer dst, VkDeviceSize size)
+{
+	VkCommandBufferAllocateInfo alloc_info = {
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+		.commandPool = graphics->transfer_command_pool,
+		.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+		.commandBufferCount = 1
+	};
+	VkCommandBuffer cmd;
+	VkResult result = vkAllocateCommandBuffers(graphics->device, &alloc_info, &cmd);
+	assert(result == VK_SUCCESS);
+
+	VkCommandBufferBeginInfo begin_info = {
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+		.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
+	};
+	result = vkBeginCommandBuffer(cmd, &begin_info);
+	assert(result == VK_SUCCESS);
+
+	VkBufferCopy copy = { .size = size };
+	vkCmdCopyBuffer(cmd, src, dst, 1, &copy);
+
+	result = vkEndCommandBuffer(cmd);
+	assert(result == VK_SUCCESS);
+
+	VkSubmitInfo submit_info = {
+		.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+		.commandBufferCount = 1,
+		.pCommandBuffers = &cmd
+	};
+	result = vkQueueSubmit(graphics->transfer_queue, 1, &submit_info, VK_NULL_HANDLE);
+	assert(result == VK_SUCCESS);
+	result = vkQueueWaitIdle(graphics->transfer_queue);
+	assert(result == VK_SUCCESS);
+
+	vkFreeCommandBuffers(graphics->device, graphics->transfer_command_pool, 1, &cmd);
 }
 
 void graphics_init(HINSTANCE instance_handle, HWND window_handle, graphics_t* graphics)
@@ -300,6 +331,7 @@ void graphics_init(HINSTANCE instance_handle, HWND window_handle, graphics_t* gr
 		assert(result == VK_SUCCESS);
 
 		vkGetDeviceQueue(graphics->device, graphics_queue_family_index, 0, &graphics->graphics_queue);
+		vkGetDeviceQueue(graphics->device, transfer_queue_family_index, 0, &graphics->transfer_queue);
 	}
 	volkLoadDevice(graphics->device);
 
@@ -479,12 +511,6 @@ void graphics_init(HINSTANCE instance_handle, HWND window_handle, graphics_t* gr
 
 		result = vkBindImageMemory(graphics->device, depth_buffer, memory, 0);
 		assert(result == VK_SUCCESS);
-
-		VkDeviceSize vertices_size = sizeof(vertices);
-
-		// todo proper allocator
-		vk_buffer_t staging_buffer = create_buffer(graphics, vertices_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-		
 	}
 
 	VkImageView depth_buffer_image_view;
@@ -648,11 +674,33 @@ void graphics_init(HINSTANCE instance_handle, HWND window_handle, graphics_t* gr
 		result = vkCreatePipelineLayout(graphics->device, &layout_info, NULL, &pipeline_layout);
 		assert(result == VK_SUCCESS);
 
-		// No vertex input yet - positions are hardcoded in the shader
+		VkVertexInputBindingDescription binding_desc = {
+			.binding = 0,
+			.stride = sizeof(vertex_t),
+			.inputRate = VK_VERTEX_INPUT_RATE_VERTEX
+		};
+		
+		VkVertexInputAttributeDescription attribute_descs[2] = {
+			{
+				.binding = 0,
+				.location = 0,
+				.format = VK_FORMAT_R32G32B32A32_SFLOAT,
+				.offset = offsetof(vertex_t, position)
+			},
+			{
+				.binding = 0,
+				.location = 1,
+				.format = VK_FORMAT_R32G32B32A32_SFLOAT,
+				.offset = offsetof(vertex_t, colour)
+			}
+		};
+
 		VkPipelineVertexInputStateCreateInfo vertex_input = {
 			.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-			.vertexBindingDescriptionCount = 0,
-			.vertexAttributeDescriptionCount = 0,
+			.vertexBindingDescriptionCount = 1,
+			.pVertexBindingDescriptions = &binding_desc,
+			.vertexAttributeDescriptionCount = 2,
+			.pVertexAttributeDescriptions = attribute_descs
 		};
 
 		VkPipelineInputAssemblyStateCreateInfo input_assembly = {
@@ -745,18 +793,28 @@ void graphics_init(HINSTANCE instance_handle, HWND window_handle, graphics_t* gr
 	}
 
 	{
-		VkCommandPoolCreateInfo poolInfo = {
+		VkCommandPoolCreateInfo pool_info = {
 			.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
 			.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
 			.queueFamilyIndex = graphics_queue_family_index,
 		};
-		VkCommandPool command_pool;
-		result = vkCreateCommandPool(graphics->device, &poolInfo, NULL, &command_pool);
+		result = vkCreateCommandPool(graphics->device, &pool_info, NULL, &graphics->graphics_command_pool);
 		assert(result == VK_SUCCESS);
+
+		if (graphics_queue_family_index == transfer_queue_family_index)
+		{
+			graphics->transfer_command_pool = graphics->graphics_command_pool;
+		}
+		else
+		{
+			pool_info.queueFamilyIndex = transfer_queue_family_index;
+			result = vkCreateCommandPool(graphics->device, &pool_info, NULL, &graphics->transfer_command_pool);
+			assert(result == VK_SUCCESS);
+		}
 
 		VkCommandBufferAllocateInfo alloc_info = {
 			.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-			.commandPool = command_pool,
+			.commandPool = graphics->graphics_command_pool,
 			.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
 			.commandBufferCount = FRAMES_IN_FLIGHT,
 		};
@@ -786,6 +844,40 @@ void graphics_init(HINSTANCE instance_handle, HWND window_handle, graphics_t* gr
 			result = vkCreateFence(graphics->device, &fence_info, NULL, &graphics->in_flight_fences[i]);
 			assert(result == VK_SUCCESS);
 		}
+	}
+
+	{
+		VkDeviceSize vertices_size = sizeof(vertices);
+		vk_buffer_t staging_buffer = create_buffer(graphics, vertices_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+		graphics->vertex_buffer = create_buffer(graphics, vertices_size, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+		void* data;
+		result = vkMapMemory(graphics->device, staging_buffer.memory, 0, vertices_size, 0, &data);
+		assert(result == VK_SUCCESS);
+		memcpy(data, vertices, vertices_size);
+		vkUnmapMemory(graphics->device, staging_buffer.memory);
+
+		copy_buffer(graphics, staging_buffer.buffer, graphics->vertex_buffer.buffer, vertices_size);
+
+		vkDestroyBuffer(graphics->device, staging_buffer.buffer, NULL);
+		vkFreeMemory(graphics->device, staging_buffer.memory, NULL);
+	}
+
+	{
+		VkDeviceSize indices_size = sizeof(indices);
+		vk_buffer_t staging_buffer = create_buffer(graphics, indices_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+		graphics->index_buffer = create_buffer(graphics, indices_size, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+		void* data;
+		result = vkMapMemory(graphics->device, staging_buffer.memory, 0, indices_size, 0, &data);
+		assert(result == VK_SUCCESS);
+		memcpy(data, indices, indices_size);
+		vkUnmapMemory(graphics->device, staging_buffer.memory);
+
+		copy_buffer(graphics, staging_buffer.buffer, graphics->index_buffer.buffer, indices_size);
+
+		vkDestroyBuffer(graphics->device, staging_buffer.buffer, NULL);
+		vkFreeMemory(graphics->device, staging_buffer.memory, NULL);
 	}
 }
 
@@ -856,6 +948,11 @@ void graphics_render(graphics_t* graphics)
 	vkCmdSetScissor(graphics->command_buffers[graphics->current_frame], 0, 1, &scissor);
 
 	vkCmdDraw(graphics->command_buffers[graphics->current_frame], 3, 1, 0, 0);
+
+	VkDeviceSize offset = 0;
+	vkCmdBindVertexBuffers(graphics->command_buffers[graphics->current_frame], 0, 1, &graphics->vertex_buffer.buffer, &offset);
+	vkCmdBindIndexBuffer(graphics->command_buffers[graphics->current_frame], graphics->index_buffer.buffer, 0, VK_INDEX_TYPE_UINT16);
+	vkCmdDrawIndexed(graphics->command_buffers[graphics->current_frame], 3, 1, 0, 0, 0);
 
 	vkCmdEndRenderPass(graphics->command_buffers[graphics->current_frame]);
 	vkEndCommandBuffer(graphics->command_buffers[graphics->current_frame]);
