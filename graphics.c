@@ -947,8 +947,6 @@ void graphics_render(graphics_t* graphics)
 	};
 	vkCmdSetScissor(graphics->command_buffers[graphics->current_frame], 0, 1, &scissor);
 
-	vkCmdDraw(graphics->command_buffers[graphics->current_frame], 3, 1, 0, 0);
-
 	VkDeviceSize offset = 0;
 	vkCmdBindVertexBuffers(graphics->command_buffers[graphics->current_frame], 0, 1, &graphics->vertex_buffer.buffer, &offset);
 	vkCmdBindIndexBuffer(graphics->command_buffers[graphics->current_frame], graphics->index_buffer.buffer, 0, VK_INDEX_TYPE_UINT16);
