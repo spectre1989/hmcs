@@ -146,12 +146,14 @@
     <ClCompile Include="file.c" />
     <ClCompile Include="graphics.c" />
     <ClCompile Include="hmcs.c" />
+    <ClCompile Include="mathutil.c" />
     <ClCompile Include="volk.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="assert.h" />
     <ClInclude Include="file.h" />
     <ClInclude Include="graphics.h" />
+    <ClInclude Include="mathutil.h" />
     <ClInclude Include="types.h" />
     <ClInclude Include="volk.h" />
   </ItemGroup>

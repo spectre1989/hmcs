@@ -16,9 +16,9 @@ typedef struct vertex_t
 } vertex_t;
 
 vertex_t vertices[3] = {
-	{.position = {0.0f, -0.5f, 0.0f}, .colour = {1.0f, 0.0f, 0.0f}},
-	{.position = {-0.5f, 0.5f, 0.0f}, .colour = {0.0f, 1.0f, 0.0f}},
-	{.position = {0.0f, 0.5f, 0.0f}, .colour = {0.0f, 0.0f, 1.0f}}
+	{.position = {0.5f, 5.f, 0.5f}, .colour = {1.0f, 0.0f, 0.0f}},
+	{.position = {0.5f, 5.f, -0.5f}, .colour = {0.0f, 1.0f, 0.0f}},
+	{.position = {-0.5f, 5.f, -0.5f}, .colour = {0.0f, 0.0f, 1.0f}}
 };
 uint16_t indices[3] = { 0,1,2 };
 
@@ -663,15 +663,21 @@ void graphics_init(HINSTANCE instance_handle, HWND window_handle, graphics_t* gr
 			}
 		};
 
+		VkPushConstantRange push_constant_range = {
+			.stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+			.offset = 0,
+			.size = sizeof(mat4_t)
+		};
+
 		VkPipelineLayoutCreateInfo layout_info = {
 			.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
 			.setLayoutCount = 0,
 			.pSetLayouts = NULL,
-			.pushConstantRangeCount = 0,
-			.pPushConstantRanges = NULL,
+			.pushConstantRangeCount = 1,
+			.pPushConstantRanges = &push_constant_range,
 		};
-		VkPipelineLayout pipeline_layout;
-		result = vkCreatePipelineLayout(graphics->device, &layout_info, NULL, &pipeline_layout);
+		
+		result = vkCreatePipelineLayout(graphics->device, &layout_info, NULL, &graphics->pipeline_layout);
 		assert(result == VK_SUCCESS);
 
 		VkVertexInputBindingDescription binding_desc = {
@@ -722,7 +728,7 @@ void graphics_init(HINSTANCE instance_handle, HWND window_handle, graphics_t* gr
 			.depthClampEnable = VK_FALSE,
 			.rasterizerDiscardEnable = VK_FALSE,
 			.polygonMode = VK_POLYGON_MODE_FILL,
-			.cullMode = VK_CULL_MODE_BACK_BIT,
+			.cullMode = VK_CULL_MODE_NONE,
 			.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
 			.depthBiasEnable = VK_FALSE,
 			.lineWidth = 1.0f,
@@ -779,7 +785,7 @@ void graphics_init(HINSTANCE instance_handle, HWND window_handle, graphics_t* gr
 			.pDepthStencilState = &depth_stencil,
 			.pColorBlendState = &color_blending,
 			.pDynamicState = &dynamic_state,
-			.layout = pipeline_layout,
+			.layout = graphics->pipeline_layout,
 			.renderPass = graphics->render_pass,
 			.subpass = 0,
 			.basePipelineHandle = VK_NULL_HANDLE
@@ -879,6 +885,8 @@ void graphics_init(HINSTANCE instance_handle, HWND window_handle, graphics_t* gr
 		vkDestroyBuffer(graphics->device, staging_buffer.buffer, NULL);
 		vkFreeMemory(graphics->device, staging_buffer.memory, NULL);
 	}
+
+	mat4_projection(60.0f * DEG_TO_RAD, graphics->swapchain_extent.width / (float32_t)graphics->swapchain_extent.height, 0.1f, 1000.0f, &graphics->projection_matrix);
 }
 
 void graphics_deinit(graphics_t* graphics)
@@ -946,6 +954,23 @@ void graphics_render(graphics_t* graphics)
 		.extent = graphics->swapchain_extent,
 	};
 	vkCmdSetScissor(graphics->command_buffers[graphics->current_frame], 0, 1, &scissor);
+
+	mat4_t model;
+	mat4_identity(&model);
+
+	mat4_t view;
+	mat4_identity(&view);
+
+	mat4_t mv;
+	mat4_mul(&view, &model, &mv);
+	mat4_t mvp;
+	mat4_mul(&graphics->projection_matrix, &mv, &mvp);
+
+	vkCmdPushConstants(graphics->command_buffers[graphics->current_frame], 
+		graphics->pipeline_layout, 
+		VK_SHADER_STAGE_VERTEX_BIT, 
+		0, sizeof(mat4_t), 
+		&mvp);
 
 	VkDeviceSize offset = 0;
 	vkCmdBindVertexBuffers(graphics->command_buffers[graphics->current_frame], 0, 1, &graphics->vertex_buffer.buffer, &offset);
