@@ -12,13 +12,13 @@
 typedef struct vertex_t
 {
 	float32_t position[3];
-	float32_t colour[3];
+	float32_t texcoords[2];
 } vertex_t;
 
 vertex_t vertices[3] = {
-	{.position = {0.5f, 5.f, 0.5f}, .colour = {1.0f, 0.0f, 0.0f}},
-	{.position = {0.5f, 5.f, -0.5f}, .colour = {0.0f, 1.0f, 0.0f}},
-	{.position = {-0.5f, 5.f, -0.5f}, .colour = {0.0f, 0.0f, 1.0f}}
+	{.position = {0.5f, 5.f, 0.5f}, .texcoords = {0.0f, 0.0f}},
+	{.position = {0.5f, 5.f, -0.5f}, .texcoords = {0.0f, 1.0f}},
+	{.position = {-0.5f, 5.f, -0.5f}, .texcoords = {1.0f, 1.0f}}
 };
 uint16_t indices[3] = { 0,1,2 };
 
@@ -93,7 +93,7 @@ static vk_buffer_t create_buffer(graphics_t* graphics, VkDeviceSize size, VkBuff
 	};
 }
 
-static void copy_buffer(graphics_t* graphics, VkBuffer src, VkBuffer dst, VkDeviceSize size)
+static VkCommandBuffer begin_one_time_commands(graphics_t* graphics)
 {
 	VkCommandBufferAllocateInfo alloc_info = {
 		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
@@ -112,10 +112,12 @@ static void copy_buffer(graphics_t* graphics, VkBuffer src, VkBuffer dst, VkDevi
 	result = vkBeginCommandBuffer(cmd, &begin_info);
 	assert(result == VK_SUCCESS);
 
-	VkBufferCopy copy = { .size = size };
-	vkCmdCopyBuffer(cmd, src, dst, 1, &copy);
+	return cmd;
+}
 
-	result = vkEndCommandBuffer(cmd);
+static void end_one_time_commands(graphics_t* graphics, VkCommandBuffer cmd)
+{
+	VkResult result = vkEndCommandBuffer(cmd);
 	assert(result == VK_SUCCESS);
 
 	VkSubmitInfo submit_info = {
@@ -129,6 +131,46 @@ static void copy_buffer(graphics_t* graphics, VkBuffer src, VkBuffer dst, VkDevi
 	assert(result == VK_SUCCESS);
 
 	vkFreeCommandBuffers(graphics->device, graphics->transfer_command_pool, 1, &cmd);
+}
+
+static void copy_buffer(graphics_t* graphics, VkBuffer src, VkBuffer dst, VkDeviceSize size)
+{
+	VkCommandBuffer cmd = begin_one_time_commands(graphics);
+
+	VkBufferCopy copy = { .size = size };
+	vkCmdCopyBuffer(cmd, src, dst, 1, &copy);
+
+	end_one_time_commands(graphics, cmd);
+}
+
+static void transition_image_layout(graphics_t* graphics, VkImage image, 
+	VkImageLayout old_layout, VkImageLayout new_layout, 
+	VkAccessFlags src_access_mask, VkAccessFlags dst_access_mask,
+	VkPipelineStageFlags src_stage, VkPipelineStageFlags dst_stage)
+{
+	VkCommandBuffer cmd = begin_one_time_commands(graphics);
+
+	VkImageMemoryBarrier memory_barrier = {
+		.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+		.oldLayout = old_layout,
+		.newLayout = new_layout,
+		.srcAccessMask = src_access_mask,
+		.dstAccessMask = dst_access_mask,
+		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.image = image,
+		.subresourceRange = {
+			.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+			.baseMipLevel = 0,
+			.levelCount = 1,
+			.baseArrayLayer = 0,
+			.layerCount = 1
+		}
+	};
+
+	vkCmdPipelineBarrier(cmd, src_stage, dst_stage, 0, 0, NULL, 0, NULL, 1, &memory_barrier);
+
+	end_one_time_commands(graphics, cmd);
 }
 
 void graphics_init(HINSTANCE instance_handle, HWND window_handle, graphics_t* graphics)
@@ -696,8 +738,8 @@ void graphics_init(HINSTANCE instance_handle, HWND window_handle, graphics_t* gr
 			{
 				.binding = 0,
 				.location = 1,
-				.format = VK_FORMAT_R32G32B32A32_SFLOAT,
-				.offset = offsetof(vertex_t, colour)
+				.format = VK_FORMAT_R32G32_SFLOAT,
+				.offset = offsetof(vertex_t, texcoords)
 			}
 		};
 
@@ -884,6 +926,90 @@ void graphics_init(HINSTANCE instance_handle, HWND window_handle, graphics_t* gr
 
 		vkDestroyBuffer(graphics->device, staging_buffer.buffer, NULL);
 		vkFreeMemory(graphics->device, staging_buffer.memory, NULL);
+	}
+
+	{
+		uint32_t pixels[] = {
+			0xFFFF00FF, 0xFF000000,  // magenta, black
+			0xFF000000, 0xFFFF00FF,  // black,   magenta
+		};
+		uint32_t width = 2;
+		uint32_t height = 2;
+		VkDeviceSize image_size = width * height * 4;
+		vk_buffer_t buffer = create_buffer(graphics, image_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+		void* data;
+		result = vkMapMemory(graphics->device, buffer.memory, 0, image_size, 0, &data);
+		assert(result == VK_SUCCESS);
+		memcpy(data, pixels, image_size);
+		vkUnmapMemory(graphics->device, buffer.memory);
+
+		VkImage texture;
+		{
+			VkImageCreateInfo create_info = {
+			.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+			.imageType = VK_IMAGE_TYPE_2D,
+			.format = VK_FORMAT_R8G8B8A8_SRGB,
+			.extent = { width, height, 1 },
+			.mipLevels = 1,
+			.arrayLayers = 1,
+			.samples = VK_SAMPLE_COUNT_1_BIT,
+			.tiling = VK_IMAGE_TILING_OPTIMAL,
+			.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+			.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+			.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
+			};
+
+			vkCreateImage(graphics->device, &create_info, NULL, &texture);
+		}
+
+		VkMemoryRequirements memory_requirements;
+		vkGetImageMemoryRequirements(graphics->device, texture, &memory_requirements);
+
+		VkDeviceMemory texture_memory = alloc_device_memory(graphics, memory_requirements.size, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, memory_requirements.memoryTypeBits);
+		result = vkBindImageMemory(graphics->device, texture, texture_memory, 0);
+		assert(result == VK_SUCCESS);
+
+		transition_image_layout(graphics, texture, 
+			VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 
+			0, VK_ACCESS_TRANSFER_WRITE_BIT, 
+			VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+
+		VkCommandBuffer cmd = begin_one_time_commands(graphics);
+
+		VkBufferImageCopy region = {
+			.bufferOffset = 0,
+			.bufferRowLength = 0,
+			.bufferImageHeight = 0,
+			.imageSubresource = {
+				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.mipLevel = 0,
+				.baseArrayLayer = 0,
+				.layerCount = 1
+			},
+			.imageOffset = { 0, 0, 0 },
+			.imageExtent = { width, height, 1 }
+		};
+		vkCmdCopyBufferToImage(cmd, buffer.buffer, texture, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+
+		end_one_time_commands(graphics, cmd);
+
+		transition_image_layout(graphics, texture,
+			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+			VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+			VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+
+		vkDestroyBuffer(graphics->device, buffer.buffer, NULL);
+		vkFreeMemory(graphics->device, buffer.memory, NULL);
+
+		VkImageView texture_view;
+		{
+			VkImageViewCreateInfo create_info = {
+			};
+			
+			result = vkCreateImageView(graphics->device, &create_info, NULL, &texture_view);
+			assert(result == VK_SUCCESS);
+		}
 	}
 
 	mat4_projection(60.0f * DEG_TO_RAD, graphics->swapchain_extent.width / (float32_t)graphics->swapchain_extent.height, 0.1f, 1000.0f, &graphics->projection_matrix);
